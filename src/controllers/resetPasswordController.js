@@ -1,20 +1,9 @@
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
+const { Resend } = require('resend');
 const supabase = require('../supabase');
 
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000
-  });
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Request reset password
 const requestReset = async (req, res) => {
@@ -22,34 +11,29 @@ const requestReset = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email wajib diisi' });
 
-    // Cek apakah email terdaftar
     const { data: merchant } = await supabase
       .from('merchants')
       .select('id, name, email')
       .eq('email', email)
       .single();
 
-    // Selalu return success meskipun email tidak ada (keamanan)
     if (!merchant) {
       return res.json({ message: 'Jika email terdaftar, link reset akan dikirim' });
     }
 
-    // Buat token unik
     const token = crypto.randomBytes(32).toString('hex');
-    const expires_at = new Date(Date.now() + 60 * 60 * 1000); // 1 jam
+    const expires_at = new Date(Date.now() + 60 * 60 * 1000);
 
-    // Simpan token ke database
     await supabase.from('password_resets').insert([{
       merchant_id: merchant.id,
       token,
       expires_at: expires_at.toISOString()
     }]);
 
-    // Kirim email
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
 
-    await transporter.sendMail({
-      from: `"Antriin" <${process.env.GMAIL_USER}>`,
+    await resend.emails.send({
+      from: 'Antriin <onboarding@resend.dev>',
       to: email,
       subject: 'Reset Password Antriin',
       html: `
@@ -83,7 +67,6 @@ const resetPassword = async (req, res) => {
     if (!token || !password) return res.status(400).json({ error: 'Token dan password wajib diisi' });
     if (password.length < 6) return res.status(400).json({ error: 'Password minimal 6 karakter' });
 
-    // Cek token valid
     const { data: resetData } = await supabase
       .from('password_resets')
       .select('*')
@@ -94,16 +77,13 @@ const resetPassword = async (req, res) => {
     if (!resetData) return res.status(400).json({ error: 'Token tidak valid atau sudah digunakan' });
     if (new Date(resetData.expires_at) < new Date()) return res.status(400).json({ error: 'Token sudah expired' });
 
-    // Hash password baru
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Update password merchant
     await supabase
       .from('merchants')
       .update({ password: hashedPassword })
       .eq('id', resetData.merchant_id);
 
-    // Tandai token sudah dipakai
     await supabase
       .from('password_resets')
       .update({ used: true })
