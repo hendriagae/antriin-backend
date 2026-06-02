@@ -30,6 +30,8 @@ app.use('/api/merchant', merchantRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/analytics', analyticsRoutes);
+const resetPasswordRoutes = require('./src/routes/resetPassword');
+app.use('/api/reset-password', resetPasswordRoutes);
 
 app.get('/', (req, res) => {
   res.json({ 
